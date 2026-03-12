@@ -1,3 +1,4 @@
+import time
 import streamlit as st
 import requests
 import google.generativeai as genai
@@ -44,40 +45,53 @@ def clean_text(text):
     return text.replace("<b>", "").replace("</b>", "").replace("&quot;", '"').replace("&apos;", "'").replace("&amp;", "&")
 
 def translate_titles(titles):
-    """뉴스 제목 번역 품질 강화 및 후처리 로직"""
+    """번역 오류 방지 로직 보강"""
     if not titles: return []
+    
+    # 공백 기사 제거
+    titles = [t for t in titles if t.strip()]
+    if not titles: return []
+
     try:
         context = ""
         for i, t in enumerate(titles):
             context += f"{i+1}. {t}\n"
             
         prompt = f"""
-        너는 실력 있는 경제/IT 전문 번역가이자 베테랑 기자야. 
-        아래 영문 뉴스 제목들을 한국 독자들이 읽기 편하게 자연스러운 '한국어 기사 제목 스타일'로 번역해줘.
+        너는 베테랑 경제 기자야. 아래 영문 뉴스 제목들을 한국 신문 헤드라인 스타일로 자연스럽게 번역해줘.
+        번호 순서대로 번역문만 한 줄씩 출력해.
         
-        [지침]
-        1. 번호 순서대로 한 줄에 하나씩 번역문만 출력해.
-        2. '의', '에' 같은 조사를 적절히 써서 문장이 매끄럽게 들리도록 해.
-        3. IT/경제 전문 용어(예: 엔비디아, 연준, 금리 인상 등)는 표준화된 용어를 사용해.
-        4. 원문의 뉘앙스를 살리되, 한국 신문 헤드라인처럼 간결하게 다듬어줘.
-        
-        [번역할 리스트]
         {context}
         """
         
-        response = model.generate_content(prompt)
-        translated_text = response.text.strip()
+        # 429 에러 방지를 위해 아주 잠깐 대기 (0.5초)
+        time.sleep(0.5) 
         
-        # 줄 단위로 나누고 번호(1. ) 제거 작업
+        response = model.generate_content(prompt)
+        
+        if not response.text:
+            return [f"인식 실패: {t}" for t in titles]
+            
+        translated_text = response.text.strip()
         translated_list = []
         for line in translated_text.split('\n'):
             clean_line = line.split('. ', 1)[-1] if '. ' in line else line
             if clean_line.strip():
                 translated_list.append(clean_line.strip())
         
+        # 만약 AI가 개수를 다르게 주면 원문 반환
+        if len(translated_list) < len(titles):
+            return titles
+            
         return translated_list
-    except:
-        return titles # 실패 시 영문 그대로 반환
+        
+    except Exception as e:
+        # 에러 메시지를 화면에 살짝 표시 (디버깅용)
+        if "429" in str(e):
+            st.warning("⚠️ AI 번역량이 일시적으로 초과되었습니다. 10초 후 새로고침하세요.")
+        else:
+            st.error(f"번역기 연결 실패: {e}")
+        return [f"(번역오류) {t}" for t in titles]
 
 def get_unique_news(items, title_key, link_key, count=3, is_global=False):
     """핵심 단어 분석 중복 제거 로직"""
@@ -152,3 +166,4 @@ with t_col2:
     st.subheader("🌎 해외 Tech (번역)")
     for i, n in enumerate(get_unique_news(fetch_global("technology"), 'title', 'url', is_global=True)):
         st.markdown(f"<div class='news-card'>{i+1}. <a href='{n['link']}' target='_blank'>{n['title']}</a></div>", unsafe_allow_html=True)
+
