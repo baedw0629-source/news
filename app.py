@@ -8,75 +8,83 @@ NAVER_CLIENT_SECRET = st.secrets["NAVER_CLIENT_SECRET"]
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 NEWSAPI_KEY = st.secrets["NEWSAPI_KEY"]
 
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-flash-latest')
-
-st.set_page_config(page_title="경제/IT 지능형 브리핑", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="데일리 뉴스 헤드라인", layout="wide")
 
 # 헤더 및 새로고침 버튼
 head_col1, head_col2 = st.columns([10, 1])
 with head_col1:
-    st.title("🚀 AI 맞춤형 통합 뉴스 대시보드")
+    st.title("📰 오늘의 핵심 뉴스 헤드라인")
 with head_col2:
     if st.button("🔄 새로고침"):
         st.rerun()
 
 def clean_text(text):
+    """HTML 태그 제거"""
+    if not text: return ""
     return text.replace("<b>", "").replace("</b>", "").replace("&quot;", '"').replace("&apos;", "'").replace("&amp;", "&")
 
-def get_raw_news(query, count=10):
-    """네이버에서 뉴스 원본 데이터를 넉넉히 가져옴"""
-    url = f"https://openapi.naver.com/v1/search/news.json?query={query}&display={count}&sort=sim"
+def get_unique_news(items, count=3):
+    """제목 기준 중복 제거 로직"""
+    unique_list = []
+    seen_titles = set()
+    
+    for item in items:
+        # 네이버와 NewsAPI의 필드명이 다르므로 처리
+        title = clean_text(item.get('title', ''))
+        link = item.get('link') if item.get('link') else item.get('url')
+        
+        # 제목 앞 10자리가 겹치면 중복으로 간주
+        title_key = title.replace(" ", "")[:10]
+        if title_key not in seen_titles and title:
+            unique_list.append({'title': title, 'link': link})
+            seen_titles.add(title_key)
+            
+        if len(unique_list) >= count:
+            break
+    return unique_list
+
+# 1. 국내 뉴스 가져오기 (네이버)
+def get_domestic_news():
+    url = "https://openapi.naver.com/v1/search/news.json?query=경제&display=15&sort=sim"
     headers = {"X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET}
     res = requests.get(url, headers=headers)
-    return res.json().get('items', []) if res.status_code == 200 else []
+    if res.status_code == 200:
+        return get_unique_news(res.json().get('items', []))
+    return []
 
-def get_combined_summary(news_list):
-    """뉴스 리스트를 통째로 넘겨서 중복 제거 후 통합 요약 (요청 횟수 절감)"""
-    if not news_list: return "뉴스가 없습니다."
-    
-    # AI에게 보낼 텍스트 구성
-    context = ""
-    for i, item in enumerate(news_list):
-        context += f"기사{i+1}\n제목: {item['title']}\n내용: {item['description']}\n\n"
-    
-    prompt = f"""
-    아래 뉴스 리스트를 보고 다음 규칙에 따라 리포트해줘:
-    1. 비슷한 내용의 기사는 하나로 통합해라.
-    2. 가장 중요한 서로 다른 주제 3가지를 선정해라.
-    3. 각 주제별로 핵심 내용을 한국어 3줄로 요약해라.
-    4. 출력 형식: 
-       ### [주제 제목]
-       - 요약문1
-       - 요약문2
-       - 요약문3
-    
-    뉴스 리스트:
-    {context}
-    """
-    try:
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        if "429" in str(e):
-            return "⚠️ 현재 AI 사용량이 많습니다. 1분만 기다렸다가 새로고침해 주세요."
-        return "⚠️ 요약 생성 중 오류가 발생했습니다."
+# 2. 해외 뉴스 가져오기 (NewsAPI)
+def get_global_news():
+    # 세계 주요 뉴스(Top Headlines) 가져오기
+    url = f"https://newsapi.org/v2/top-headlines?category=business&language=en&apiKey={NEWSAPI_KEY}"
+    res = requests.get(url)
+    if res.status_code == 200:
+        return get_unique_news(res.json().get('articles', []))
+    return []
 
-# --- 섹션별 출력 ---
-sections = [("📈 오늘의 주요 경제 소식", "경제"), ("💻 오늘의 핵심 IT/테크", "IT 테크 최신")]
+# --- 화면 출력 ---
+col_dom, col_glo = st.columns(2)
 
-for section_title, query in sections:
-    st.header(section_title)
-    raw_news = get_raw_news(query)
-    
-    if raw_news:
-        with st.status(f"{section_title} 분석 중...", expanded=True):
-            # 섹션당 1번만 AI 호출 (경제 1번, IT 1번 = 총 2번 호출로 끝!)
-            summary_result = get_combined_summary(raw_news)
-            st.markdown(summary_result)
-            
-            # 원문 링크들을 모아서 아래에 작게 표시
-            with st.expander("🔗 관련 기사 원문 보기"):
-                for item in raw_news[:5]:
-                    st.caption(f"[{clean_text(item['title'])}]({item['link']})")
-    st.divider()
+with col_dom:
+    st.header("🇰🇷 국내 주요 뉴스 (경제)")
+    domestic = get_domestic_news()
+    if domestic:
+        for i, news in enumerate(domestic):
+            st.subheader(f"{i+1}. {news['title']}")
+            st.write(f"[기사 보기]({news['link']})")
+            st.write("")
+    else:
+        st.write("국내 뉴스를 불러올 수 없습니다.")
+
+with col_glo:
+    st.header("🌎 해외 주요 뉴스 (Business)")
+    global_news = get_global_news()
+    if global_news:
+        for i, news in enumerate(global_news):
+            st.subheader(f"{i+1}. {news['title']}")
+            st.write(f"[Original Link]({news['link']})")
+            st.write("")
+    else:
+        st.write("해외 뉴스를 불러올 수 없습니다. (API 키 확인 필요)")
+
+st.divider()
+st.caption("AI 요약 기능을 제외하여 할당량 제한 없이 실시간 뉴스를 빠르게 제공합니다.")
