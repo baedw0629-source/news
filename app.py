@@ -1,66 +1,67 @@
 import streamlit as st
 import requests
 
-# 1. API 키 설정 (가장 먼저 수행)
-# Streamlit Cloud의 Secrets에 적은 이름과 정확히 일치해야 합니다.
+# 1. API 키 설정
 try:
     NAVER_ID = st.secrets["NAVER_CLIENT_ID"]
     NAVER_SECRET = st.secrets["NAVER_CLIENT_SECRET"]
     NEWS_API_KEY = st.secrets["NEWSAPI_KEY"]
-except Exception as e:
-    st.error("API 키를 찾을 수 없습니다. Secrets 설정을 확인하세요.")
-    st.stop() # 키가 없으면 실행 중단
+except Exception:
+    st.error("Secrets 설정 확인 필요")
+    st.stop()
 
-# 페이지 설정
 st.set_page_config(page_title="종합 뉴스 대시보드", layout="wide", initial_sidebar_state="collapsed")
 
-# CSS: 글자 크기 줄이기 및 화면 최적화
+# 레이아웃 스타일
 st.markdown("""
     <style>
-    .reportview-container .main .block-container { padding-top: 1rem; }
-    h1 { font-size: 24px !important; }
-    h2 { font-size: 18px !important; color: #1f77b4; border-bottom: 1px solid #ddd; padding-bottom: 5px; }
-    .news-item { font-size: 14px !important; margin-bottom: 8px; line-height: 1.4; }
-    a { text-decoration: none; color: #31333F; font-weight: 500; }
-    a:hover { color: #ff4b4b; }
+    h1 { font-size: 24px !important; margin-bottom: 0px; }
+    h2 { font-size: 18px !important; color: #1f77b4; margin-top: 10px; border-bottom: 1px solid #ddd; }
+    h3 { font-size: 15px !important; margin-top: 5px; }
+    .news-box { padding: 5px; margin-bottom: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
-# 헤더
-head_col1, head_col2 = st.columns([10, 1.2])
-head_col1.title("📰 실시간 핵심 뉴스 (경제 · IT)")
-if head_col2.button("🔄 새로고침"):
+# 헤더 영역
+h_col1, h_col2 = st.columns([10, 1])
+h_col1.title("📰 뉴스 브리핑 (경제 · IT)")
+if h_col2.button("🔄 새로고침"):
     st.rerun()
 
 def clean_text(text):
     if not text: return ""
     return text.replace("<b>", "").replace("</b>", "").replace("&quot;", '"').replace("&apos;", "'").replace("&amp;", "&")
 
-def get_unique_news(items, title_key, link_key, count=3):
-    """중복 제거 로직 강화: 공백 제거 후 15자 비교"""
-    unique = []
-    seen_keys = set()
+def get_strong_unique_news(items, title_key, link_key, count=3):
+    """제목의 핵심 단어를 추출하여 중복을 원천 차단하는 로직"""
+    unique_news = []
+    seen_word_sets = []
     
     for item in items:
         title = clean_text(item.get(title_key, ""))
         link = item.get(link_key, "")
-        if not title: continue
         
-        # 중복 판단 키: 공백 제거 후 앞 15글자 (이게 같으면 같은 뉴스로 취급)
-        match_key = title.replace(" ", "")[:15]
+        # 제목에서 2글자 이상의 단어만 추출 (조사 제외 목적)
+        words = set([w for w in title.split() if len(w) >= 2])
         
-        if match_key not in seen_keys:
-            unique.append({'title': title, 'link': link})
-            seen_keys.add(match_key)
+        # 기존에 저장된 뉴스 단어셋들과 비교
+        is_dup = False
+        for existing_set in seen_word_sets:
+            # 단어가 2개 이상 겹치면 같은 뉴스라고 판단
+            if len(words.intersection(existing_set)) >= 2:
+                is_dup = True
+                break
+        
+        if not is_dup:
+            unique_news.append({'title': title, 'link': link})
+            seen_word_sets.append(words)
             
-        if len(unique) >= count:
+        if len(unique_news) >= count:
             break
-    return unique
+    return unique_news
 
-# 뉴스 가져오기 함수들 (상단에 정의된 NAVER_ID 사용)
 def fetch_naver(query):
-    url = f"https://openapi.naver.com/v1/search/news.json?query={query}&display=20&sort=sim"
-    # 여기서 NAVER_ID와 NAVER_SECRET을 정확히 사용합니다.
+    url = f"https://openapi.naver.com/v1/search/news.json?query={query}&display=30&sort=sim"
     headers = {"X-Naver-Client-Id": NAVER_ID, "X-Naver-Client-Secret": NAVER_SECRET}
     res = requests.get(url, headers=headers)
     return res.json().get('items', []) if res.status_code == 200 else []
@@ -70,38 +71,27 @@ def fetch_global(category):
     res = requests.get(url)
     return res.json().get('articles', []) if res.status_code == 200 else []
 
-# --- 대시보드 화면 구성 (4분할) ---
-
-# 1. 경제 섹션
+# --- 대시보드 배치 ---
+# 1행: 경제
 st.header("📈 경제 (Economy)")
 e_col1, e_col2 = st.columns(2)
-
 with e_col1:
     st.subheader("🇰🇷 국내 주요 경제")
-    news = get_unique_news(fetch_naver("경제"), 'title', 'link')
-    for i, n in enumerate(news):
-        st.markdown(f"<div class='news-item'>{i+1}. <a href='{n['link']}' target='_blank'>{n['title']}</a></div>", unsafe_allow_html=True)
-
+    for i, n in enumerate(get_strong_unique_news(fetch_naver("경제"), 'title', 'link')):
+        st.markdown(f"**{i+1}.** [{n['title']}]({n['link']})")
 with e_col2:
     st.subheader("🌎 해외 Business")
-    news = get_unique_news(fetch_global("business"), 'title', 'url')
-    for i, n in enumerate(news):
-        st.markdown(f"<div class='news-item'>{i+1}. <a href='{n['link']}' target='_blank'>{n['title']}</a></div>", unsafe_allow_html=True)
+    for i, n in enumerate(get_strong_unique_news(fetch_global("business"), 'title', 'url')):
+        st.markdown(f"**{i+1}.** [{n['title']}]({n['link']})")
 
-st.write("") # 간격
-
-# 2. IT 섹션
+# 2행: IT
 st.header("💻 IT · 테크 (Technology)")
 t_col1, t_col2 = st.columns(2)
-
 with t_col1:
     st.subheader("🇰🇷 국내 IT 소식")
-    news = get_unique_news(fetch_naver("IT 과학 기술"), 'title', 'link')
-    for i, n in enumerate(news):
-        st.markdown(f"<div class='news-item'>{i+1}. <a href='{n['link']}' target='_blank'>{n['title']}</a></div>", unsafe_allow_html=True)
-
+    for i, n in enumerate(get_strong_unique_news(fetch_naver("IT 기술 테크"), 'title', 'link')):
+        st.markdown(f"**{i+1}.** [{n['title']}]({n['link']})")
 with t_col2:
     st.subheader("🌎 해외 Tech")
-    news = get_unique_news(fetch_global("technology"), 'title', 'url')
-    for i, n in enumerate(news):
-        st.markdown(f"<div class='news-item'>{i+1}. <a href='{n['link']}' target='_blank'>{n['title']}</a></div>", unsafe_allow_html=True)
+    for i, n in enumerate(get_strong_unique_news(fetch_global("technology"), 'title', 'url')):
+        st.markdown(f"**{i+1}.** [{n['title']}]({n['link']})")
