@@ -3,10 +3,10 @@ import requests
 import google.generativeai as genai
 
 # 1. 모든 API 키 설정
-NAVER_CLIENT_ID = "gSg91KNBvsNYAeTYW5o3"
-NAVER_CLIENT_SECRET = "wusIlWS8Dz"
-GEMINI_API_KEY = "AIzaSyDIv7Zm_XQBwyzuDOdgf_-DzUt5BbcE_BI"
-NEWSAPI_KEY = "NEWSAPI_키387c37399be0430087a289dd2acb11d1"
+NAVER_CLIENT_ID = "NAVER_CLIENT_ID"
+NAVER_CLIENT_SECRET = "NAVER_CLIENT_SECRET"
+GEMINI_API_KEY = "GEMINI_API_KEY"
+NEWSAPI_KEY = "NEWSAPI_KEY"
 # Gemini 설정
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-flash-latest')
@@ -92,4 +92,5 @@ else:
 
 # 새로고침 버튼
 if st.sidebar.button("🔄 전체 뉴스 새로고침"):
+
     st.rerun()
