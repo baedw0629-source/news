@@ -7,83 +7,88 @@ NAVER_CLIENT_SECRET = st.secrets["NAVER_CLIENT_SECRET"]
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 NEWSAPI_KEY = st.secrets["NEWSAPI_KEY"]
 
-st.set_page_config(page_title="데일리 뉴스 헤드라인", layout="wide")
+# 페이지 설정: 와이드 모드 및 사이드바 숨김
+st.set_page_config(page_title="종합 뉴스 대시보드", layout="wide", initial_sidebar_state="collapsed")
 
-# 헤더 및 새로고침 버튼
+# CSS로 글자 크기 및 간격 미세 조정
+st.markdown("""
+    <style>
+    .reportview-container .main .block-container { padding-top: 1rem; }
+    h1 { font-size: 28px !important; }
+    h2 { font-size: 22px !important; border-bottom: 2px solid #f0f2f6; padding-bottom: 5px; }
+    h3 { font-size: 16px !important; line-height: 1.4 !important; margin-bottom: 5px !important; }
+    .stCaption { font-size: 12px !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# 헤더
 head_col1, head_col2 = st.columns([10, 1])
-with head_col1:
-    st.title("📰 오늘의 핵심 뉴스 헤드라인")
-with head_col2:
-    if st.button("🔄 새로고침"):
-        st.rerun()
+head_col1.title("핵심 뉴스 브리핑 (경제 · IT)")
+if head_col2.button("🔄 새로고침"):
+    st.rerun()
 
 def clean_text(text):
-    """HTML 태그 제거"""
     if not text: return ""
     return text.replace("<b>", "").replace("</b>", "").replace("&quot;", '"').replace("&apos;", "'").replace("&amp;", "&")
 
-def get_unique_news(items, count=3):
-    """제목 기준 중복 제거 로직"""
-    unique_list = []
-    seen_titles = set()
+def get_unique_news(items, title_key, link_key, count=3):
+    """중복 제거 로직 강화: 제목의 공백을 제거하고 앞부분 15자리를 비교"""
+    unique = []
+    seen_keys = set()
     
     for item in items:
-        # 네이버와 NewsAPI의 필드명이 다르므로 처리
-        title = clean_text(item.get('title', ''))
-        link = item.get('link') if item.get('link') else item.get('url')
+        title = clean_text(item.get(title_key, ""))
+        link = item.get(link_key, "")
+        if not title: continue
         
-        # 제목 앞 10자리가 겹치면 중복으로 간주
-        title_key = title.replace(" ", "")[:10]
-        if title_key not in seen_titles and title:
-            unique_list.append({'title': title, 'link': link})
-            seen_titles.add(title_key)
+        # 중복 판단 키: 공백 제거 후 앞 15글자 추출 (매우 엄격함)
+        match_key = title.replace(" ", "")[:15]
+        
+        if match_key not in seen_keys:
+            unique.append({'title': title, 'link': link})
+            seen_keys.add(match_key)
             
-        if len(unique_list) >= count:
+        if len(unique) >= count:
             break
-    return unique_list
+    return unique
 
-# 1. 국내 뉴스 가져오기 (네이버)
-def get_domestic_news():
-    url = "https://openapi.naver.com/v1/search/news.json?query=경제&display=15&sort=sim"
-    headers = {"X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET}
-    res = requests.get(url, headers=headers)
-    if res.status_code == 200:
-        return get_unique_news(res.json().get('items', []))
-    return []
+# 뉴스 데이터 가져오기 함수들
+def fetch_naver(query):
+    url = f"https://openapi.naver.com/v1/search/news.json?query={query}&display=20&sort=sim"
+    res = requests.get(url, headers={"X-Naver-Client-Id": NAVER_ID, "X-Naver-Client-Secret": NAVER_SECRET})
+    return res.json().get('items', []) if res.status_code == 200 else []
 
-# 2. 해외 뉴스 가져오기 (NewsAPI)
-def get_global_news():
-    # 세계 주요 뉴스(Top Headlines) 가져오기
-    url = f"https://newsapi.org/v2/top-headlines?category=business&language=en&apiKey={NEWSAPI_KEY}"
+def fetch_global(category):
+    url = f"https://newsapi.org/v2/top-headlines?category={category}&language=en&apiKey={NEWS_API_KEY}"
     res = requests.get(url)
-    if res.status_code == 200:
-        return get_unique_news(res.json().get('articles', []))
-    return []
+    return res.json().get('articles', []) if res.status_code == 200 else []
 
-# --- 화면 출력 ---
-col_dom, col_glo = st.columns(2)
+# --- 1행: 경제 섹션 ---
+st.header("📈 경제 (Economy)")
+e_col1, e_col2 = st.columns(2)
 
-with col_dom:
-    st.header("🇰🇷 국내 주요 뉴스 (경제)")
-    domestic = get_domestic_news()
-    if domestic:
-        for i, news in enumerate(domestic):
-            st.subheader(f"{i+1}. {news['title']}")
-            st.write(f"[기사 보기]({news['link']})")
-            st.write("")
-    else:
-        st.write("국내 뉴스를 불러올 수 없습니다.")
+with e_col1:
+    st.subheader("🇰🇷 국내 경제")
+    for i, n in enumerate(get_unique_news(fetch_naver("경제"), 'title', 'link')):
+        st.markdown(f"**{i+1}.** [{n['title']}]({n['link']})")
 
-with col_glo:
-    st.header("🌎 해외 주요 뉴스 (Business)")
-    global_news = get_global_news()
-    if global_news:
-        for i, news in enumerate(global_news):
-            st.subheader(f"{i+1}. {news['title']}")
-            st.write(f"[Original Link]({news['link']})")
-            st.write("")
-    else:
-        st.write("해외 뉴스를 불러올 수 없습니다. (API 키 확인 필요)")
+with e_col2:
+    st.subheader("🌎 해외 경제 (Biz)")
+    for i, n in enumerate(get_unique_news(fetch_global("business"), 'title', 'url')):
+        st.markdown(f"**{i+1}.** [{n['title']}]({n['link']})")
 
-st.divider()
-st.caption("AI 요약 기능을 제외하여 할당량 제한 없이 실시간 뉴스를 빠르게 제공합니다.")
+st.write("---")
+
+# --- 2행: IT 섹션 ---
+st.header("💻 IT · 테크 (Technology)")
+t_col1, t_col2 = st.columns(2)
+
+with t_col1:
+    st.subheader("🇰🇷 국내 IT")
+    for i, n in enumerate(get_unique_news(fetch_naver("IT 기술 테크"), 'title', 'link')):
+        st.markdown(f"**{i+1}.** [{n['title']}]({n['link']})")
+
+with t_col2:
+    st.subheader("🌎 해외 IT")
+    for i, n in enumerate(get_unique_news(fetch_global("technology"), 'title', 'url')):
+        st.markdown(f"**{i+1}.** [{n['title']}]({n['link']})")
